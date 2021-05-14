@@ -203,6 +203,7 @@ hospitalPar = 0.05 # How many infected people ends up needing hospital care?
 
 # The maximum time duration of the outbreak.
 t_end = 500
+# t_max = 25*7 # Section 4.6
 
 # Initial number of infected and recovered individuals, I0 and R0.
 I0, R0 = 10, 0
@@ -222,7 +223,9 @@ lowbnd, highbnd = 0.01, 1
 def MSE_interpol(days, data, I, scaling, hospitalPar):
     obj, i = 0, 0
     while i < len(days):
+    # while i < len(days) and days[i] < 25*7: # Section 4.6
         obj = obj + (data(days[i])*scaling - I(days[i])*hospitalPar)**2
+        # obj = obj + (data(days[i])*scaling - np.abs(I(days[i]) - I(days[i-1]))*hospitalPar)**2 # Section 4.6
         i = i + 1
     return obj / i
 
@@ -237,6 +240,9 @@ for i in range(n):
             
     # Interpolate the I_array.
     ctmc_interpl = interp1d(t_array, I_array, kind='linear', bounds_error = False, fill_value = 0)
+    
+    # Interpolate the I_array.
+    # ctmc_interpl = interp1d(t_array, S_array, kind='linear', bounds_error=False, fill_value=0) # Section 4.6
         
     mse = MSE_interpol(days, h_cur, ctmc_interpl, scaling, hospitalPar)
         
@@ -265,7 +271,8 @@ plt.show()
 n = 10000
 
 # Total population, N, contact rate, beta, and mean recovery rate, gamma, (in 1/days).
-scaling = 1/1000
+scaling = 1
+# scaling = 1/1000 # Section 4.6
 N, gamma = 10000000 * scaling, 1./14
 hospitalPar = 0.05 # How many infected people ends up needing hospital care?
 
@@ -286,12 +293,15 @@ lowbnd, highbnd = 0.01, 1
 
 # A grid of time points.
 t = np.linspace(0, 7*len(days) - 1)
+# t = np.linspace(0, 25*7) # Section 4.6
 
 # Returns MSE for given interpolated data.
 def MSE(days, t, data, I, scaling, hospitalPar):
     obj, i = 0, 0
     while i < len(t):
+    # while i < len(t) and days[i] < 25*7: # Section 4.6
         obj = obj + (data(t[i])*scaling - I[i]*hospitalPar)**2
+        # obj = obj + (data(t[i])*scaling - np.abs(I[i]-I[i-1])*hospitalPar)**2
         i = i + 1
     return obj / i
 
@@ -306,8 +316,10 @@ for i in range(n):
     
     # Replace not a number with 0.
     I[np.isnan(I)] = 0
+    # S[np.isnan(S)] = 0 # Section 4.6
     
     mse = MSE(days, t, h_cur, I, scaling, hospitalPar)
+    # mse = MSE(days, t, h_cur, S, scaling, hospitalPar) # Section 4.6
         
     if mse < mse_max:
         betas.append(theta)
