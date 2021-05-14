@@ -1,0 +1,182 @@
+'''
+Individbaserad nätverksmodell för smittspridning av Covid-19 i Sverige.
+Input till modellen är parametrar heltalen pSE och weightPar, och statistisk data från Socialstyrelsen på antal döda och sjukhusinläggningar.
+Output är två grafer, en som beskriver antal individer i S, I, R och antal döda. En graf som beskriver antal sjukhusinläggningar.
+
+Filen reloadData måste köras först och sedan kan networkModel köras.
+'''
+
+import networkx as nx
+import matplotlib.pyplot as plt
+import seaborn as sns
+import numpy as np
+import random
+import pandas as pd
+import time
+
+# Initierar nätverket och ger attribut till varje nod. Input är antal noder och startvärde i barabasi-albert-grafen.
+def initGraph(numberOfNodes, m):
+    G = nx.barabasi_albert_graph(numberOfNodes, m)
+    nx.set_node_attributes(G, 'SUSCEPTIBLE', 'diseaseStatus')
+    nx.set_node_attributes(G, False, 'isIncubationDone')
+    nx.set_node_attributes(G, 0, 'infectionTime')
+    nodeHighestDegree = sorted((G.degree), key=lambda x: x[1], reverse=True)[50][0] # sätter den nod med 50:onde flest kanter till infected
+    G.nodes[nodeHighestDegree]['diseaseStatus'] = 'INFECTED'
+    for i in range(round(numberOfNodes * 0.005)): # sätter 0,5 % av noderna till infected
+        G.nodes[np.random.randint(0, numberOfNodes)]['diseaseStatus'] = 'INFECTED'
+    return G
+
+# Ger alla noder en vikten 1 initialt. 
+def initWeight(G):
+    for (u, v) in G.edges():
+        G.edges[u,v]['weight'] = 1
+        
+# Uppdaterar räknaren med antal noder i varje tillstånd        
+def updateCounter(G, stateDistribution):
+    currentStatus = nx.get_node_attributes(G,'diseaseStatus')
+    try:
+        nS, nI, nR, nD, nH = 0, 0, 0, 0, stateDistribution[-1][4] # gör räknaren kumulativ för hospital-tillståndet
+    except IndexError:
+        nS, nI, nR, nD, nH=0, 0, 0, 0, 0
+    for j in range(len(currentStatus)):
+        if currentStatus[j] == 'SUSCEPTIBLE':
+            nS = nS + 1
+        if currentStatus[j] == 'INFECTED':
+            nI = nI + 1
+        if currentStatus[j] == 'RECOVERED':
+            nR = nR + 1
+        if currentStatus[j] == 'DEAD':
+            nD = nD + 1
+        if currentStatus[j] == 'HOSPITAL':
+            nH = nH + 1
+    stateDistribution.append([nS, nI, nR, nD, nH])
+    return stateDistribution
+
+# Uppdaterar tillstånd för varje nod. 
+def updateDisease(G, hospitalDeathPar, infectedFirstWeek, gamma, sigma, hospitalPar, directDeathPar, pSE):
+    for node in G:
+        if G.nodes[node]['diseaseStatus'] == 'EXPOSED':
+            if random.random() < infectedFirstWeek or G.nodes[node]['isIncubationDone']:
+                G.nodes[node]['diseaseStatus'] = 'INFECTED'
+            else:
+                G.nodes[node]['isIncubationDone'] = True        
+    for nodes in G:
+        if G.nodes[nodes]['diseaseStatus'] == 'HOSPITAL':
+            if random.random() < hospitalDeathPar:
+                G.nodes[nodes]['diseaseStatus'] = 'DEAD'
+            else:
+                G.nodes[nodes]['diseaseStatus'] = 'RECOVERED'
+        if G.nodes[nodes]['diseaseStatus'] == 'INFECTED':
+            if G.nodes[nodes]['infectionTime'] >= random.normalvariate(gamma, sigma):
+                if random.random() < hospitalPar:
+                    G.nodes[nodes]['diseaseStatus'] = 'HOSPITAL'
+                elif random.random() < directDeathPar:
+                    G.nodes[nodes]['diseaseStatus'] = 'DEAD'
+                else:
+                    G.nodes[nodes]['diseaseStatus'] = 'RECOVERED'
+            else:
+                G.nodes[nodes]['infectionTime'] = G.nodes[nodes]['infectionTime'] + 7
+                for neighborNodes in G.neighbors(nodes):
+                    if G.edges[nodes, neighborNodes]['weight'] > random.random():
+                        if G.nodes[neighborNodes]['diseaseStatus'] == 'SUSCEPTIBLE' and random.random() < pSE:
+                            G.nodes[neighborNodes]['diseaseStatus'] = 'EXPOSED'
+
+# Justerar vikterna för noderna vid givna villkor.
+def adjustWeight(G, numberOfNodes, stateDistribution, i, isGoingDown, weightPar):
+    if isGoingDown == False and stateDistribution[i][1] > 0.01 * numberOfNodes:
+        for (u, v) in G.edges():
+            G.edges[u, v]['weight'] = weightPar
+        return True
+    elif isGoingDown and stateDistribution[i][1] < 0.005 * numberOfNodes:
+        for (u, v) in G.edges():
+            G.edges[u, v]['weight'] = 1
+        return False
+    else:
+        return isGoingDown
+    
+# Plottar ut första grafen med individer i S, I, R och D och även statistisk data för D.    
+def plotStateDistribution(stateDistribution, y_observed):
+    sns.set_theme()
+    fig, axes = plt.subplots(2, 2, figsize=(15, 15))
+    fig.suptitle('COVID-19 simulering över tid som procent')
+    x = range(len(stateDistribution))
+    sns.lineplot(ax = axes[0,0], x = x, y = [j[0] for j in stateDistribution], color='green')
+    axes[0,0].set_title('SUSCEPTIBLE')
+    sns.lineplot(ax = axes[0,1], x = x, y = [j[1] for j in stateDistribution], color='red')
+    axes[0,1].set_title('INFECTED')
+    sns.lineplot(ax = axes[1,0], x = x, y = [j[2] for j in stateDistribution], color='blue')
+    axes[1,0].set_title('RECOVERED')
+    sns.lineplot(ax = axes[1,1], x = x, y = [j[3] for j in stateDistribution], color='grey')
+    axes[1,1].set_title('DEAD')
+    sns.lineplot(ax = axes[1, 1],x = [x for x in range(len(y_observed))], y = y_observed, color='black')
+    plt.show()
+
+# Plottar ut första grafen med individer i H och även statistisk data för H.     
+def plotState(y_hospital_model, y_observed):
+    sns.set_theme()
+    fig, axes = plt.subplots(1, 1, figsize=(15, 15))
+    fig.suptitle('COVID-19 simulering över tid som procent')
+    sns.lineplot(ax = axes, x = [x for x in range(len(y_hospital_model))], y = y_hospital_model, color='grey')
+    sns.lineplot(ax = axes, x = [x for x in range(len(y_observed))], y = y_observed, color='black')
+    axes.set_title('HOSPITAL')
+    plt.show()
+
+# Justerar statistisk data så att den blir jämförbar med datan från modellen.
+def adjustData(key):
+    popSweden=10*10**6
+    if key == 'dead':    
+        covidData = pd.read_csv('Covid19_avlidna.csv')
+        return covidData['kum_antal_avlidna'] / popSweden
+    elif key == 'hospital':    
+        covidData = pd.read_csv('Covid19_sjukhus.csv')
+        return covidData['kum_antal_sjukhus'] / popSweden
+
+# main för modellen där funktionerna körs.    
+def model(pSE, weightPar, plotOn):
+    t0 = time.time()
+    numberOfNodes = 10000
+    m = 2
+    directDeathPar = 0.006
+    hospitalDeathPar = 0.159
+    hospitalPar = 0.05
+    gamma = 14.2
+    sigma = 5.94
+    infectedFirstWeek = 0.78
+    y_dead_observed = adjustData('dead') * numberOfNodes
+    y_hospital_observed = adjustData('hospital') * numberOfNodes
+    
+    timeSteps = len(y_hospital_observed) #kan behöva ändras!
+    stateDistribution = []
+    isGoingDown = False
+    
+    G = initGraph(numberOfNodes,m)
+    initWeight(G)
+    
+    for i in range(timeSteps):
+        stateDistribution = updateCounter(G, stateDistribution)
+        isGoingDown = adjustWeight(G, numberOfNodes, stateDistribution, i, isGoingDown, weightPar)
+        updateDisease(G, hospitalDeathPar, infectedFirstWeek, gamma, sigma, hospitalPar, directDeathPar, pSE)
+   
+    y_hospital_model = [states[4] for states in stateDistribution]
+    
+    if plotOn:
+        plotStateDistribution(stateDistribution, y_dead_observed)
+        plotState(y_hospital_model, y_hospital_observed)
+    print("Tid totalt:", time.time() - t0)
+    return {"states":stateDistribution, "y_hospital_model":y_hospital_model, "y_dead_observed":y_dead_observed, "y_hospital_observed":y_hospital_observed}
+
+# Kör modellen
+pSE = 0.1
+weightPar = 0.2
+
+mod = model(pSE, weightPar, True)
+
+# Plottar tjocka linjer för modellen vid en parameterkombination
+hPerWeek = []
+tme = []
+for i in range(5):
+    mod = model(pSE, weightPar, False)
+    hPerWeek = hPerWeek + mod['y_hospital_model']
+    tme = tme + [week for week in range(len(mod['y_hospital_model']))]
+sns.relplot(x = tme, y = hPerWeek, kind = 'line')
+sns.lineplot(x = [x for x in range(len(mod['y_hospital_observed']))], y=mod['y_hospital_observed'])  
