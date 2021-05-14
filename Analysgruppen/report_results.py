@@ -211,7 +211,7 @@ I0, R0 = 10, 0
 betas = []
 
 # Arbitrary limit on MSE. 
-# MSE with only zeroes and scaling, 1/1000, is 1.4020050961665422.
+# MSE with only zeroes and scaling 1/1000, is 1.4020050961665422.
 mse_max = 1.25
 
 # Prior bounds.
@@ -236,9 +236,9 @@ for i in range(n):
     S_array, I_array, R_array, t_array = CTMC(N, theta, gamma, t_end, I0, R0)
             
     # Interpolate the I_array.
-    f2 = interp1d(t_array, I_array, kind='linear', bounds_error = False, fill_value = 0)
+    ctmc_interpl = interp1d(t_array, I_array, kind='linear', bounds_error = False, fill_value = 0)
         
-    mse = MSE_interpol(days, h_cur, f2, scaling, hospitalPar)
+    mse = MSE_interpol(days, h_cur, ctmc_interpl, scaling, hospitalPar)
         
     if mse < mse_max:
         betas.append(theta)
@@ -262,10 +262,10 @@ plt.show()
 # %% ABC and the SDE-model.
 
 # The number of trials. 
-n = 100000
+n = 10000
 
 # Total population, N, contact rate, beta, and mean recovery rate, gamma, (in 1/days).
-scaling = 1
+scaling = 1/1000
 N, gamma = 10000000 * scaling, 1./14
 hospitalPar = 0.05 # How many infected people ends up needing hospital care?
 
@@ -279,8 +279,8 @@ I0, R0 = 10, 0
 betas = []
 
 # Arbitrary limit on MSE. 
-# # MSE with only zeroes and scaling, 1/1000, is 1443883.1278705022.
-mse_max = 1250000
+# # MSE with only zeroes and scaling 1, is 1443883.1278705022.
+mse_max = 1.25
 
 lowbnd, highbnd = 0.01, 1
 
@@ -297,7 +297,7 @@ def MSE(days, t, data, I, scaling, hospitalPar):
 
 # ABC algoritm.
 now = time.time() # Timer.
-for i in range(n - 1):
+for i in range(n):
     # Our prior. 
     theta = random.uniform(lowbnd, highbnd)
     
@@ -311,7 +311,7 @@ for i in range(n - 1):
         
     if mse < mse_max:
         betas.append(theta)
-        # print(mse)
+        print(mse)
 
 elapsed = time.time() - now
 print(elapsed)
@@ -331,7 +331,7 @@ plt.show()
 # %% ABC and the SIR-model.
 
 # The number of trials. 
-n = 10000
+n = 100000
 
 # Total population, N and mean recovery rate, gamma, (in 1/days).
 scaling = 1
@@ -395,7 +395,8 @@ plt.show()
 # %% Approximation of how many pandemics die early. 
 
 # Total population, N, contact rate, beta, and mean recovery rate, gamma, (in 1/days).
-N_markov, N_sde, beta_markov, beta_sde, gamma = 10000, 10000000, 0.075, 0.09, 1./14
+# N_ctmc, N_sde, beta_ctmc, beta_sde, gamma = 10000, 10000000, 0.075, 0.09, 1./14
+N_ctmc, N_sde, beta_ctmc, beta_sde, gamma = 10000, 10000, 0.1, 0.1, 1./14
 
 # The time duration of the outbreak.
 t_end = 500
@@ -406,9 +407,6 @@ T = 385 # Total time.
 # Initial number of infected and recovered individuals, I0 and R0.
 I0 = [1, 2, 3, 4, 5, 7, 10, 20]
 R0 = 0
-
-# Define what "dies early" means. 
-largest_infected = [2, 4, 6, 8, 10, 14, 20, 40]
 
 # Initialize the arrays.
 propDeadCTMC = []
@@ -423,14 +421,21 @@ for i in range(len(I0)):
 
     counter_ctmc, counter_sde = 0, 0
     
-    for j in range(n - 1):
-        S_array, I_array, R_array, t_array = CTMC(N_markov, beta_markov, gamma, t_end, I0[i], R0)
+    for j in range(n):
+        S_array, I_array, R_array, t_array = CTMC(N_ctmc, beta_ctmc, gamma, t_end, I0[i], R0)
         S, I, R, t = SDE_EM(N_sde, beta_sde, gamma, dt, T, I0[i], R0)
-        I_array_max = max(I_array)
-        I_max = max(I)
-        if largest_infected[i] > I_array_max:
+        
+        # Interpolate the I_array.
+        ctmc_interpl = interp1d(t_array, I_array, kind='linear', bounds_error = False, fill_value = 0)
+        
+        # Replace not a number with 0.
+        I[np.isnan(I)] = 0
+    
+        if 1 > ctmc_interpl(100):
             counter_ctmc = counter_ctmc + 1
-        if largest_infected[i] > I_max:
+        
+        # t[100] = 100.26041666666667
+        if 1 > I[100]:
             counter_sde = counter_sde + 1
             
     propDeadCTMC.append(counter_ctmc / n)
